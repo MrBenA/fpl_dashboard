@@ -1,0 +1,54 @@
+import base64
+import requests
+import json
+import pandas as pd
+from google.cloud import storage
+from datetime import datetime
+
+def create_file_name():
+    """Generate csv filename with timestamp"""
+    
+    # Get current datetime as string
+    date = datetime.now().strftime("%Y-%m-%d_%H:%M:%S")
+
+    file_name = 'endpoint_player_data_' + date + '.csv'
+    
+    return file_name
+
+def upload_blob(bucket_name, source_file, destination_file_name):
+    """Upload csv file to GCS bucket.
+    Args:
+        bucket_name: target GCS bucket name
+        source_file: source file from cloud function tmp storage
+        destination_file_name: GCS file name
+    """
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(destination_file_name)
+
+    blob.upload_from_filename(source_file)
+
+
+def players_pubsub(event, context):
+    """Triggered from a message on a Cloud Pub/Sub topic.
+    Args:
+         event (dict): Event payload.
+         context (google.cloud.functions.Context): Metadata for the event.
+    """
+    # Create a filename
+    file_name = create_file_name()
+    
+    # Get request from FPL API endpoint as json object
+    gameweek_data_endpoint = 'https://fantasy.premierleague.com/api/bootstrap-static/'
+    r = requests.get(gameweek_data_endpoint)
+    fpl_json_data = r.json()
+
+    #Build player data dataframe from json object
+    elements_df = pd.DataFrame(fpl_json_data['elements'])
+    # Parse dataframe to csv
+    elements_df.to_csv('/tmp/' + file_name, index=False)
+
+    # Upload the file to GCS bucket
+    bucket_name = 'fpl_dashboard_21-22'
+    source_file_location = '/tmp/' + file_name
+    upload_blob(bucket_name, source_file_location, file_name)
